@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Google OAuth secrets - never commit these
+credentials.json
+token.json
+
+# local task database
+*.db
