@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
+from .dates import has_time
 from .config import CREDENTIALS_PATH, TOKEN_PATH
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
@@ -54,20 +55,32 @@ def get_service() -> Any:
     return build("calendar", "v3", credentials=creds)
 
 
-def create_event(
-    service: Any, title: str, due: datetime, reminder_minutes: int = 30
-) -> str:
+def build_event_body(title: str, due: datetime, reminder_minutes: int = 30) -> dict:
+    """Timed event if the task has a time; otherwise an all-day event."""
+    if not has_time(due):
+        day = due.date()
+        return {
+            "summary": title,
+            "start": {"date": day.isoformat()},
+            "end": {"date": (day + timedelta(days=1)).isoformat()},
+            "reminders": {"useDefault": True},
+        }
     start = _to_aware(due)
-    end = start + timedelta(minutes=30)
-    body = {
+    return {
         "summary": title,
         "start": {"dateTime": start.isoformat()},
-        "end": {"dateTime": end.isoformat()},
+        "end": {"dateTime": (start + timedelta(minutes=30)).isoformat()},
         "reminders": {
             "useDefault": False,
             "overrides": [{"method": "popup", "minutes": reminder_minutes}],
         },
     }
+
+
+def create_event(
+    service: Any, title: str, due: datetime, reminder_minutes: int = 30
+) -> str:
+    body = build_event_body(title, due, reminder_minutes)
     event = service.events().insert(calendarId="primary", body=body).execute()
     return event["id"]
 
