@@ -110,3 +110,39 @@ def test_old_database_is_migrated(fresh_db):
     assert (task.title, task.bucket, task.notes) == ("legacy", "inbox", "")
     # opening it twice must not try to add the columns again
     assert len(storage.list_tasks()) == 1
+
+
+def test_delete_leaves_a_tombstone_for_syncing():
+    t = storage.add_task("t", None)
+    storage.delete_task(t.id)
+    (row,) = storage.export_all()
+    assert row["deleted"] == 1 and row["uid"]
+
+
+def test_every_edit_bumps_updated_at():
+    t = storage.add_task("t", None)
+    before = storage.export_all()[0]["updated_at"]
+    storage.set_notes(t.id, "n")
+    assert storage.export_all()[0]["updated_at"] > before
+
+
+def test_migration_gives_legacy_rows_unique_uids(fresh_db):
+    conn = sqlite3.connect(fresh_db)
+    conn.execute(
+        "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,"
+        " due TEXT, done INTEGER NOT NULL DEFAULT 0, gcal_event_id TEXT, created_at TEXT NOT NULL)"
+    )
+    for name in ("one", "two"):
+        conn.execute("INSERT INTO tasks (title, created_at) VALUES (?, '2026-01-01T00:00:00')", (name,))
+    conn.commit()
+    conn.close()
+    rows = storage.export_all()
+    assert len({r["uid"] for r in rows}) == 2 and all(r["updated_at"] for r in rows)
+
+
+def test_import_rows_upserts_by_uid():
+    t = storage.add_task("local", None)
+    (row,) = storage.export_all()
+    storage.import_rows([{**row, "title": "from cloud"}])
+    assert storage.get_task(t.id).title == "from cloud"
+    assert len(storage.export_all()) == 1
