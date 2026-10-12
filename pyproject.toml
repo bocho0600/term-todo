@@ -2,7 +2,15 @@
 name = "term-todo"
 version = "0.1.0"
 description = "A terminal to-do list that can sync tasks to Google Calendar"
+readme = "README.md"
 requires-python = ">=3.9"
+keywords = ["todo", "cli", "tui", "terminal", "google-calendar"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
 dependencies = [
     "typer>=0.12",
     "rich>=13.0",
@@ -11,6 +19,10 @@ dependencies = [
     "google-auth-httplib2>=0.2",
     "google-auth-oauthlib>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/bocho0600/term-todo"
+Issues = "https://github.com/bocho0600/term-todo/issues"
 
 [project.scripts]
 term-todo = "term_todo.cli:app"
