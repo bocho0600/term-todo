@@ -6,8 +6,11 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from . import storage
+from .models import DEFAULT_BUCKET
+from .dates import format_due, parse_due
 from .calendar_sync import create_event, delete_event, get_service
 
 app = typer.Typer(
@@ -16,20 +19,11 @@ app = typer.Typer(
 )
 console = Console()
 
-DATE_FORMATS = ["%Y-%m-%d %H:%M", "%Y-%m-%d", "%d/%m/%Y %H:%M", "%d/%m/%Y"]
-
-
 def _parse_due(due: Optional[str]) -> Optional[datetime]:
-    if not due:
-        return None
-    for fmt in DATE_FORMATS:
-        try:
-            return datetime.strptime(due, fmt)
-        except ValueError:
-            continue
-    raise typer.BadParameter(
-        f"Could not parse '{due}'. Try 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'."
-    )
+    try:
+        return parse_due(due)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()
@@ -38,35 +32,128 @@ def add(
     due: Optional[str] = typer.Option(
         None, "--due", "-d", help="Due date/time, e.g. '2026-10-15 18:00'"
     ),
+    bucket: str = typer.Option(
+        DEFAULT_BUCKET, "--bucket", "-b", help="Bucket, e.g. work or personal"
+    ),
+    note: str = typer.Option("", "--note", "-n", help="Notes for this task"),
 ) -> None:
     """Add a new task."""
-    task = storage.add_task(title, _parse_due(due))
+    task = storage.add_task(title, _parse_due(due), bucket.strip().lower(), note)
     suffix = f" (due {task.due})" if task.due else ""
-    console.print(f"[green]Added[/green] #{task.id}: {task.title}{suffix}")
+    console.print(
+        f"[green]Added[/green] #{task.id} [cyan]\\[{task.bucket}][/cyan]: {task.title}{suffix}"
+    )
 
 
 @app.command("list")
 def list_cmd(
     all: bool = typer.Option(False, "--all", "-a", help="Include completed tasks"),
+    bucket: Optional[str] = typer.Option(
+        None, "--bucket", "-b", help="Only show this bucket"
+    ),
 ) -> None:
-    """List tasks."""
-    tasks = storage.list_tasks(include_done=all)
+    """List tasks (all buckets, or one with --bucket)."""
+    tasks = storage.list_tasks(
+        include_done=all, bucket=bucket.strip().lower() if bucket else None
+    )
     if not tasks:
         console.print("[dim]No tasks found.[/dim]")
         raise typer.Exit()
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("ID", justify="right")
+    table.add_column("Bucket", style="cyan")
     table.add_column("Status")
     table.add_column("Title")
+    table.add_column("Note")
     table.add_column("Due")
     table.add_column("Synced")
     for t in tasks:
         status = "[green]done[/green]" if t.done else "[yellow]pending[/yellow]"
-        due = t.due.strftime("%Y-%m-%d %H:%M") if t.due else "-"
+        due = format_due(t.due, short=False) if t.due else "-"
         synced = "yes" if t.gcal_event_id else "-"
-        table.add_row(str(t.id), status, t.title, due, synced)
+        table.add_row(str(t.id), t.bucket, status, t.title, "✎" if t.notes else "", due, synced)
     console.print(table)
+
+
+@app.command()
+def note(
+    task_id: int,
+    text: Optional[str] = typer.Argument(None, help="Text to append as a new line"),
+    clear: bool = typer.Option(False, "--clear", help="Delete all notes on the task"),
+) -> None:
+    """Show a task's notes, or append a line to them."""
+    task = storage.get_task(task_id)
+    if not task:
+        console.print(f"[red]No task with id {task_id}[/red]")
+        raise typer.Exit(code=1)
+    if clear:
+        storage.set_notes(task_id, "")
+        console.print(f"[green]Cleared notes[/green] on #{task_id}")
+    elif text:
+        storage.set_notes(task_id, f"{task.notes}\n{text}" if task.notes else text)
+        console.print(f"[green]Added note[/green] to #{task_id} {task.title}")
+    else:
+        console.print(f"[bold]#{task.id} {task.title}[/bold] [cyan]\\[{task.bucket}][/cyan]")
+        console.print(Text(task.notes) if task.notes else "[dim]No notes.[/dim]")
+
+
+@app.command()
+def ui() -> None:
+    """Open the interactive terminal UI."""
+    from .ui import run
+
+    run()
+
+
+@app.command()
+def tray(
+    detach: bool = typer.Option(False, "--detach", "-d", help="Run in the background"),
+    install_autostart: bool = typer.Option(
+        False, "--install-autostart", help="Start the tray icon automatically at login"
+    ),
+    remove_autostart: bool = typer.Option(
+        False, "--remove-autostart", help="Stop starting the tray icon at login"
+    ),
+) -> None:
+    """Show a panel icon with your pending-task count; click it to list them."""
+    from . import tray as tray_mod
+
+    if install_autostart:
+        path = tray_mod.install_autostart()
+        console.print(f"[green]Will start at login:[/green] {path}")
+        return
+    if remove_autostart:
+        gone = tray_mod.remove_autostart()
+        console.print("[green]Autostart removed.[/green]" if gone else "[dim]Autostart wasn't set.[/dim]")
+        return
+    if detach:
+        tray_mod.spawn_detached()
+        console.print("[green]Tray icon started.[/green]")
+        return
+    raise typer.Exit(code=tray_mod.run())
+
+
+@app.command()
+def buckets() -> None:
+    """List buckets with their pending task counts."""
+    rows = storage.bucket_counts()
+    if not rows:
+        console.print("[dim]No buckets yet.[/dim]")
+        raise typer.Exit()
+    for name, pending in rows:
+        console.print(f"[cyan]{name}[/cyan]  {pending} pending")
+
+
+@app.command()
+def mv(task_id: int, bucket: str) -> None:
+    """Move a task to another bucket."""
+    task = storage.get_task(task_id)
+    if not task:
+        console.print(f"[red]No task with id {task_id}[/red]")
+        raise typer.Exit(code=1)
+    storage.set_bucket(task_id, bucket.strip().lower())
+    console.print(f"[green]Moved[/green] #{task_id} to [cyan]{bucket.strip().lower()}[/cyan]")
 
 
 @app.command()
@@ -112,7 +199,9 @@ def sync(
     to_push = storage.tasks_needing_push()
     for task in to_push:
         assert task.due is not None
-        event_id = create_event(service, task.title, task.due, reminder_minutes=reminder)
+        event_id = create_event(
+            service, f"[{task.bucket}] {task.title}", task.due, reminder_minutes=reminder
+        )
         storage.set_gcal_event_id(task.id, event_id)
         console.print(f"[green]Pushed[/green] #{task.id} -> calendar event {event_id}")
 

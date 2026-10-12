@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+DEFAULT_BUCKET = "inbox"
+
 
 @dataclass
 class Task:
@@ -11,3 +13,5 @@ class Task:
     done: bool
     gcal_event_id: Optional[str]
     created_at: datetime
+    bucket: str = DEFAULT_BUCKET
+    notes: str = ""

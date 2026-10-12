@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Iterator, List, Optional
 
 from .config import DB_PATH
-from .models import Task
+from .models import DEFAULT_BUCKET, Task
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -24,6 +24,13 @@ def connect() -> Iterator[sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     try:
         conn.execute(SCHEMA)
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(tasks)")]
+        if "notes" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+        if "bucket" not in cols:
+            conn.execute(
+                f"ALTER TABLE tasks ADD COLUMN bucket TEXT NOT NULL DEFAULT '{DEFAULT_BUCKET}'"
+            )
         yield conn
         conn.commit()
     finally:
@@ -38,14 +45,19 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         done=bool(row["done"]),
         gcal_event_id=row["gcal_event_id"],
         created_at=datetime.fromisoformat(row["created_at"]),
+        bucket=row["bucket"],
+        notes=row["notes"],
     )
 
 
-def add_task(title: str, due: Optional[datetime]) -> Task:
+def add_task(
+    title: str, due: Optional[datetime], bucket: str = DEFAULT_BUCKET, notes: str = ""
+) -> Task:
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO tasks (title, due, done, created_at) VALUES (?, ?, 0, ?)",
-            (title, due.isoformat() if due else None, datetime.now().isoformat()),
+            "INSERT INTO tasks (title, due, done, created_at, bucket, notes)"
+            " VALUES (?, ?, 0, ?, ?, ?)",
+            (title, due.isoformat() if due else None, datetime.now().isoformat(), bucket, notes),
         )
         task_id = cur.lastrowid
     task = get_task(task_id)
@@ -59,19 +71,59 @@ def get_task(task_id: int) -> Optional[Task]:
         return _row_to_task(row) if row else None
 
 
-def list_tasks(include_done: bool = False) -> List[Task]:
-    query = "SELECT * FROM tasks"
+def list_tasks(include_done: bool = False, bucket: Optional[str] = None) -> List[Task]:
+    clauses, params = [], []
     if not include_done:
-        query += " WHERE done = 0"
-    query += " ORDER BY (due IS NULL), due, id"
+        clauses.append("done = 0")
+    if bucket:
+        clauses.append("bucket = ?")
+        params.append(bucket)
+    query = "SELECT * FROM tasks"
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY bucket, (due IS NULL), due, id"
     with connect() as conn:
-        rows = conn.execute(query).fetchall()
+        rows = conn.execute(query, params).fetchall()
     return [_row_to_task(r) for r in rows]
 
 
 def mark_done(task_id: int) -> None:
     with connect() as conn:
         conn.execute("UPDATE tasks SET done = 1 WHERE id = ?", (task_id,))
+
+
+def set_bucket(task_id: int, bucket: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE tasks SET bucket = ? WHERE id = ?", (bucket, task_id))
+
+
+def bucket_counts() -> List[tuple]:
+    """(bucket, pending_count) for every bucket that has any tasks."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT bucket, SUM(done = 0) AS pending FROM tasks GROUP BY bucket ORDER BY bucket"
+        ).fetchall()
+    return [(r["bucket"], r["pending"] or 0) for r in rows]
+
+
+def set_done(task_id: int, done: bool) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE tasks SET done = ? WHERE id = ?", (int(done), task_id))
+
+
+def update_task(
+    task_id: int, title: str, due: Optional[datetime], bucket: str, notes: str = ""
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET title = ?, due = ?, bucket = ?, notes = ? WHERE id = ?",
+            (title, due.isoformat() if due else None, bucket, notes, task_id),
+        )
+
+
+def set_notes(task_id: int, notes: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE tasks SET notes = ? WHERE id = ?", (notes, task_id))
 
 
 def delete_task(task_id: int) -> None:
