@@ -19,6 +19,8 @@ system-tray counter, and optional one-way sync to Google Calendar.
   calendar + scrolling-time picker for due dates.
 - **Tray icon** – a panel icon showing your pending count; click it to see
   what's waiting.
+- **Sync across machines** – sign in with Google and your tasks follow you to every
+  computer, stored privately in your own Google account (no server, no extra service).
 - **Google Calendar sync** – due tasks become calendar events (timed events
   with a popup reminder, or all-day events when no time is set) and are
   removed when you tick the task off.
@@ -41,7 +43,9 @@ system-tray counter, and optional one-way sync to Google Calendar.
 - [Command reference](#command-reference)
 - [Terminal UI](#terminal-ui)
 - [Tray icon (Linux)](#tray-icon-linux)
+- [Sign in & sync across machines](#sign-in--sync-across-machines)
 - [Google Calendar sync](#google-calendar-sync)
+- [Google setup (one time)](#google-setup-one-time)
 - [Configuration & data](#configuration--data)
 - [Updating & uninstalling](#updating--uninstalling)
 - [Troubleshooting](#troubleshooting)
@@ -118,7 +122,9 @@ term-todo ui                         # open the full-screen UI
 | `term-todo note ID [TEXT] [--clear]` | Show a task's notes, append a line, or clear them. |
 | `term-todo done ID` | Mark a task done. |
 | `term-todo rm ID` | Delete a task (and its Calendar event, if any). |
-| `term-todo sync [--reminder MIN]` | Push due tasks to Google Calendar. |
+| `term-todo login` | Sign in with Google (enables cross-machine sync and Calendar). |
+| `term-todo logout` | Sign out on this machine (local tasks are kept). |
+| `term-todo sync [--reminder MIN]` | Merge tasks with your other machines, then push due tasks to Google Calendar. |
 | `term-todo ui` | Open the interactive terminal UI. |
 | `term-todo tray [-d] [--install-autostart] [--remove-autostart]` | Run the tray icon. |
 
@@ -195,10 +201,68 @@ you may need `gnome-shell-extension-appindicator`.
 
 Only one tray icon runs at a time; starting a second just exits.
 
+## Sign in & sync across machines
+
+Use term-todo on more than one computer and keep one task list. Sign in with the
+same Google account on each machine and your tasks (buckets, notes, due dates,
+done state) are merged through a small file in your Google Drive.
+
+- **Private by design.** The file lives in Drive's hidden *app data* folder. It
+  doesn't appear in your Drive, no other app can read it, and term-todo can't
+  see anything else in your Drive. There is no term-todo server.
+- **Works offline.** Everything is stored locally first; changes sync when you
+  next have a connection.
+
+### Set it up
+
+1. Do the [Google setup](#google-setup-one-time) once (it includes enabling the
+   **Google Drive API**).
+2. On each machine, install term-todo and put the OAuth client file at
+   `~/.term-todo/credentials.json`. On a second machine the easiest way is to
+   copy it from the first:
+
+   ```bash
+   mkdir -p ~/.term-todo
+   scp first-machine:~/.term-todo/credentials.json ~/.term-todo/
+   chmod 600 ~/.term-todo/credentials.json
+   ```
+
+3. Sign in:
+
+   ```bash
+   term-todo login
+   ```
+
+   A browser opens; choose the same Google account on every machine. The first
+   login also uploads or downloads your tasks, so a new machine immediately gets
+   your list.
+
+### How it behaves
+
+- **Automatic in the UI.** `term-todo ui` syncs when it opens, a few seconds
+  after each change you make, and once more when you quit. The header shows
+  `☁ synced 14:05` (or `☁ offline` if it couldn't reach Google).
+- **Automatic in the tray.** The tray icon syncs every few minutes, so its count
+  stays current.
+- **On demand from the CLI.** Plain commands like `add` and `done` only change
+  this machine; run `term-todo sync` to push them. (`term-todo sync` also
+  updates Google Calendar.)
+- **Conflicts:** if the same task was edited on two machines, the most recent
+  edit wins. Deleting a task on one machine deletes it everywhere.
+- **Task numbers are per machine.** The `#id` shown in `list` may differ between
+  computers, so use titles (or the UI) rather than ids when talking across
+  machines.
+- **Calendar events are shared.** Once one machine has pushed a task to Google
+  Calendar, the others know about the event and won't create a duplicate.
+- **Signing out:** `term-todo logout` forgets the login on this machine and keeps
+  your local tasks. It doesn't delete the cloud copy; to remove that, go to
+  Google Drive → Settings → Manage apps → term-todo → *Delete hidden app data*.
+
 ## Google Calendar sync
 
-Syncing is **one-way** (term-todo → Google Calendar) and **manual**: run
+Calendar sync is **one-way** (term-todo → Google Calendar) and **manual**: run
 `term-todo sync` (or press `s` in the UI) whenever you want to push changes.
+(Task syncing between machines, above, is separate and automatic in the UI.)
 
 - Each pending task with a due date becomes an event titled `[bucket] title`.
   - With a time: a 30-minute event with a popup reminder (default 30 minutes
@@ -211,15 +275,19 @@ Syncing is **one-way** (term-todo → Google Calendar) and **manual**: run
 - Tasks with no due date are never synced.
 - Notes are **not** sent to Calendar.
 
-### One-time setup
+Setting up Google access is described in [Google setup](#google-setup-one-time).
 
-Google requires every app to use its own OAuth client, so you create one
-(free, ~5 minutes) and point term-todo at it.
+## Google setup (one time)
+
+Google requires every app to use its own OAuth client, so you create one (free,
+about 5 minutes) and point term-todo at it. The same client is used on all your
+machines.
 
 1. Open the [Google Cloud Console](https://console.cloud.google.com/) and
    create a project (or pick an existing one).
-2. **Enable the API:** APIs & Services → Library → search for
-   **Google Calendar API** → **Enable**.
+2. **Enable the APIs:** APIs & Services → Library → enable both the
+   **Google Calendar API** and the **Google Drive API** (Drive is used only for
+   the hidden sync file). Skip Drive if you only want Calendar.
 3. **Configure the consent screen:** Google Auth Platform → set it up with
    user type **External**. Then, on the **Audience** page, add your own Google
    account under **Test users**. *(Skipping this causes "Error 403:
@@ -238,10 +306,11 @@ Google requires every app to use its own OAuth client, so you create one
    chmod 600 ~/.term-todo/credentials.json
    ```
 
-7. Run `term-todo sync`. A browser opens: pick your account (the one you added
+7. Run `term-todo login`. A browser opens: pick your account (the one you added
    as a test user), click **Advanced → Go to term-todo (unsafe)** past the
-   "unverified app" warning (it's *your* app), and allow calendar access. A
-   token is cached at `~/.term-todo/token.json`, so you only sign in once.
+   "unverified app" warning (it's *your* app), and allow access (Google Calendar, plus Drive "app data" for sync). A
+   token is cached at `~/.term-todo/token.json`, so you only sign in once per
+   machine.
 
 > **Note:** while the consent screen's publishing status is **Testing**, Google
 > expires the login after **7 days** and you'll be asked to sign in again. To
@@ -296,12 +365,16 @@ uninstall.
 |---|---|
 | `command not found: term-todo` | Run `pipx ensurepath` and open a new terminal, or make sure `~/.local/bin` is on your `PATH`. |
 | `error: externally-managed-environment` from `pip` | Use pipx or a virtualenv as shown in [Install](#install) rather than `pip install` into the system Python. |
-| `Missing Google OAuth client file` | You haven't saved `~/.term-todo/credentials.json` yet — see [setup](#one-time-setup). |
+| `Missing Google OAuth client file` | You haven't saved `~/.term-todo/credentials.json` yet — see [Google setup](#google-setup-one-time). On a second machine, copy it from your first. |
 | `Error 403: access_denied` when signing in | Add your Google account under **Audience → Test users** in the Cloud Console, then try again. |
 | `redirect_uri_mismatch` | The OAuth client isn't type **Desktop app**; create a new Desktop client. |
 | Sync worked but I can't see the event | Date-only tasks are all-day events — look in the banner at the top of that day. Tasks with no due date are never synced. |
 | Asked to sign in again after about a week | The consent screen is in **Testing** mode; switch it to **In production** (see the note above), or just sign in again. |
-| Sync in the UI says "Not signed in to Google yet" | Run `term-todo sync` once in a shell to complete the browser sign-in. |
+| Sync in the UI says "Not signed in to Google yet" | Run `term-todo login` once in a shell to complete the browser sign-in. |
+| `Cloud sync skipped: The Google Drive API isn't enabled…` | Enable the **Google Drive API** for your project (link is in the message), wait a minute, run `term-todo sync` again. |
+| `Cloud sync skipped: Not signed in` / asked to sign in again | Run `term-todo login`. (An expired or revoked login needs this too.) |
+| Tasks from my other machine don't show up | Both machines must use the **same Google account**. Run `term-todo sync` on the machine that has the tasks, then on the other (the UI does this automatically). |
+| Cloud data was written by a newer term-todo | Upgrade this machine: `pipx upgrade term-todo`. |
 | Tray icon doesn't appear | Needs a StatusNotifier-capable panel (on GNOME enable the AppIndicator extension) and `python3-gi` visible to the install. Run `term-todo tray` (without `-d`) to see any error. |
 | `ModuleNotFoundError: gi` / "needs PyGObject" | `sudo apt install python3-gi`, then reinstall with `--system-site-packages`. |
 | Layout looks broken or colours are off | Use a modern terminal with true-colour and Unicode support and make it at least ~100 columns wide. |
@@ -366,7 +439,7 @@ live, users can install with `pipx install term-todo`.
 ## Roadmap
 
 - Two-way sync (pull edits made in Google Calendar back into term-todo)
-- Automatic background sync
+- Optional automatic cloud sync for plain CLI commands (`add`, `done`, …)
 - Recurring tasks
 - Local desktop notifications in addition to Calendar reminders
 
