@@ -1,0 +1,58 @@
+name: Release
+
+# Publishes to PyPI when you push a version tag, e.g.:
+#   git tag v0.2.0 && git push origin v0.2.0
+# Uses PyPI "trusted publishing" (no API token stored in GitHub).
+# One-time setup is described in the README ("Releasing").
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine pytest -e .
+      - run: pytest -q
+      - run: python -m build
+      - run: twine check dist/*
+      - name: Tag must match the package version
+        run: |
+          VERSION=$(python -c "import importlib.metadata as m; print(m.version('term-todo'))")
+          test "v$VERSION" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} != version v$VERSION"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --generate-notes
