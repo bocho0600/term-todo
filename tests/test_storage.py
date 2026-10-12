@@ -146,3 +146,36 @@ def test_import_rows_upserts_by_uid():
     storage.import_rows([{**row, "title": "from cloud"}])
     assert storage.get_task(t.id).title == "from cloud"
     assert len(storage.export_all()) == 1
+
+
+def test_completing_repeating_task_creates_next_one():
+    from datetime import datetime, timedelta
+
+    due = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    t = storage.add_task("standup notes", due, "work", "bring laptop", "weekly")
+    nxt = storage.mark_done(t.id)
+    assert nxt is not None and nxt.id != t.id
+    assert nxt.due == due + timedelta(weeks=1)
+    assert (nxt.title, nxt.bucket, nxt.notes, nxt.repeat) == ("standup notes", "work", "bring laptop", "weekly")
+    assert not nxt.done and nxt.uid != t.uid
+    assert [x.id for x in storage.list_tasks()] == [nxt.id]
+
+
+def test_untick_and_retick_does_not_duplicate():
+    from datetime import datetime
+
+    due = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    t = storage.add_task("weekly review", due, repeat="weekly")
+    assert storage.set_done(t.id, True) is not None
+    storage.set_done(t.id, False)
+    assert storage.set_done(t.id, True) is None
+    assert len(storage.list_tasks(include_done=True)) == 2
+
+
+def test_plain_and_undated_tasks_never_repeat():
+    from datetime import datetime
+
+    plain = storage.add_task("one-off", datetime(2026, 1, 1))
+    assert storage.mark_done(plain.id) is None
+    undated = storage.add_task("no date", None, repeat="weekly")
+    assert undated.repeat == ""

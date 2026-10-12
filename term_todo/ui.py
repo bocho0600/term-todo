@@ -28,7 +28,7 @@ from textual.widgets.option_list import Option
 from . import cloud, google_auth, storage
 from .calendar_sync import create_event, delete_event, get_service
 from .config import TOKEN_PATH
-from .dates import format_due, has_time, is_overdue, parse_due
+from .dates import format_due, has_time, is_overdue, parse_due, parse_repeat
 from .models import DEFAULT_BUCKET, Task
 
 ALL = "__all__"
@@ -223,11 +223,18 @@ class TaskForm(ModalScreen[Optional[Dict[str, str]]]):
     ]
 
     def __init__(
-        self, heading: str, title: str = "", due: str = "", bucket: str = "", notes: str = ""
+        self,
+        heading: str,
+        title: str = "",
+        due: str = "",
+        bucket: str = "",
+        notes: str = "",
+        repeat: str = "",
     ) -> None:
         super().__init__()
         self.heading = heading
         self._title, self._due, self._bucket, self._notes = title, due, bucket, notes
+        self._repeat = repeat
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
@@ -238,6 +245,8 @@ class TaskForm(ModalScreen[Optional[Dict[str, str]]]):
             with Horizontal(id="due-row"):
                 yield Input(self._due, placeholder="2026-10-15 18:00", id="f-due")
                 yield Button("📅 Pick", id="pick-date")
+            yield Label("Repeat  [dim](daily / weekly / monthly · needs a due date · optional)[/dim]")
+            yield Input(self._repeat, placeholder="weekly", id="f-repeat")
             yield Label("Bucket")
             yield Input(self._bucket, placeholder=DEFAULT_BUCKET, id="f-bucket")
             yield Label("Notes  [dim](Ctrl+S to save)[/dim]")
@@ -295,11 +304,17 @@ class TaskForm(ModalScreen[Optional[Dict[str, str]]]):
             return
         try:
             parse_due(due)
+            repeat = parse_repeat(self.query_one("#f-repeat", Input).value)
         except ValueError as exc:
             error.update(f"[red]{exc}[/red]")
             return
+        if repeat and not due:
+            error.update("[red]A repeating task needs a due date[/red]")
+            return
         notes = self.query_one("#f-notes", TextArea).text.strip()
-        self.dismiss({"title": title, "due": due, "bucket": bucket, "notes": notes})
+        self.dismiss(
+            {"title": title, "due": due, "bucket": bucket, "notes": notes, "repeat": repeat}
+        )
 
 
 class Confirm(ModalScreen[bool]):
@@ -480,7 +495,7 @@ class TodoApp(App):
                 mark, title = Text("☐", style="bold yellow"), Text(t.title)
             if t.due:
                 style = "bold red" if (is_overdue(t.due, now) and not t.done) else ""
-                due = Text(format_due(t.due), style=style)
+                due = Text(format_due(t.due) + (" ↻" if t.repeat else ""), style=style)
             else:
                 due = Text("—", style="dim")
             cal = Text("✓", style="cyan") if t.gcal_event_id else Text("", style="dim")
@@ -540,9 +555,14 @@ class TodoApp(App):
     def _checkbox_clicked(self, event: TaskTable.CheckboxClicked) -> None:
         if 0 <= event.row < len(self.tasks):
             task = self.tasks[event.row]
-            storage.set_done(task.id, not task.done)
-            self.refresh_all(keep_task_id=task.id)
-            self._mark_dirty()
+            self._toggle(task)
+
+    def _toggle(self, task: Task) -> None:
+        nxt = storage.set_done(task.id, not task.done)
+        self.refresh_all(keep_task_id=task.id)
+        self._mark_dirty()
+        if nxt and nxt.due:
+            self.notify(f"Next: {format_due(nxt.due)} ↻ {nxt.repeat}")
 
     # ---- actions ----
     def action_add(self) -> None:
@@ -552,7 +572,11 @@ class TodoApp(App):
             if not result:
                 return
             task = storage.add_task(
-                result["title"], parse_due(result["due"]), result["bucket"], result["notes"]
+                result["title"],
+                parse_due(result["due"]),
+                result["bucket"],
+                result["notes"],
+                result["repeat"],
             )
             self.current_bucket = task.bucket if self.current_bucket != ALL else ALL
             self.refresh_all(keep_task_id=task.id)
@@ -576,14 +600,15 @@ class TodoApp(App):
                 # Event is now stale: drop it so the next sync recreates it.
                 self._drop_event(task)
             storage.update_task(
-                task.id, result["title"], new_due, result["bucket"], result["notes"]
+                task.id, result["title"], new_due, result["bucket"], result["notes"], result["repeat"]
             )
             self.refresh_all(keep_task_id=task.id)
             self._mark_dirty()
             self.notify(f"Updated #{task.id}")
 
         self.push_screen(
-            TaskForm("Edit task", title=task.title, due=due, bucket=task.bucket, notes=task.notes), done
+            TaskForm("Edit task", title=task.title, due=due, bucket=task.bucket,
+                     notes=task.notes, repeat=task.repeat), done
         )
 
     def _drop_event(self, task: Task) -> None:
@@ -598,9 +623,7 @@ class TodoApp(App):
         task = self._selected()
         if not task:
             return
-        storage.set_done(task.id, not task.done)
-        self.refresh_all(keep_task_id=task.id)
-        self._mark_dirty()
+        self._toggle(task)
 
     def action_delete(self) -> None:
         task = self._selected()

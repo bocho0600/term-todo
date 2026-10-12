@@ -52,3 +52,25 @@ def test_date_only_task_not_overdue_until_day_has_passed():
     due = datetime(2026, 10, 16)
     assert not is_overdue(due, datetime(2026, 10, 16, 23, 59))
     assert is_overdue(due, datetime(2026, 10, 17, 0, 1))
+
+
+def test_parse_repeat():
+    from term_todo.dates import parse_repeat
+
+    assert parse_repeat(" Weekly ") == "weekly"
+    assert parse_repeat("") == "" and parse_repeat(None) == "" and parse_repeat("none") == ""
+    with pytest.raises(ValueError):
+        parse_repeat("fortnightly")
+
+
+def test_next_due_skips_missed_occurrences():
+    from term_todo.dates import next_due
+
+    now = datetime(2026, 10, 12, 9, 0)
+    assert next_due(datetime(2026, 10, 12), "weekly", now) == datetime(2026, 10, 19)
+    assert next_due(datetime(2026, 10, 16, 18, 0), "weekly", now) == datetime(2026, 10, 23, 18, 0)
+    # three weeks overdue: jump to the next future slot, same weekday and time
+    assert next_due(datetime(2026, 9, 21, 8, 30), "weekly", now) == datetime(2026, 10, 19, 8, 30)
+    assert next_due(datetime(2026, 10, 12), "daily", now) == datetime(2026, 10, 13)
+    assert next_due(datetime(2026, 1, 31), "monthly", datetime(2026, 1, 31)) == datetime(2026, 2, 28)
+    assert next_due(datetime(2026, 12, 15), "monthly", datetime(2026, 12, 15)) == datetime(2027, 1, 15)

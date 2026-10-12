@@ -115,7 +115,7 @@ term-todo ui                         # open the full-screen UI
 
 | Command | What it does |
 |---|---|
-| `term-todo add TITLE [-b BUCKET] [-d DUE] [-n NOTE]` | Add a task. |
+| `term-todo add TITLE [-b BUCKET] [-d DUE] [-n NOTE] [-r REPEAT]` | Add a task (`-r daily\|weekly\|monthly` makes it repeat). |
 | `term-todo list [-b BUCKET] [--all]` | List pending tasks (add `--all` for completed too). |
 | `term-todo buckets` | Show every bucket with its pending count. |
 | `term-todo mv ID BUCKET` | Move a task to another bucket. |
@@ -140,6 +140,21 @@ A due date **without a time** is *date-only*: it's shown without a clock time,
 isn't overdue until the day has passed, and syncs to Google Calendar as an
 **all-day event**. (Because of this, a due time of exactly `00:00` is treated
 as "no time".)
+
+### Repeating tasks
+
+```bash
+term-todo add "Team report" -d "2026-10-16 17:00" -b work -r weekly
+```
+
+Give a task a due date and a repeat rule (`daily`, `weekly` or `monthly`).
+When you tick it off, the next occurrence is created automatically with the
+same title, bucket, notes and time, so each week gets its own task and Calendar
+event (and shows up on your other machines). If you finish late, missed
+occurrences are skipped and the next one lands on the first matching day after
+today. A monthly task on the 29th–31st moves to the last day of shorter months.
+Repeating tasks show a `↻` in lists. In the UI, use the **Repeat** field in the
+add/edit form.
 
 ## Terminal UI
 
@@ -440,7 +455,7 @@ live, users can install with `pipx install term-todo`.
 
 - Two-way sync (pull edits made in Google Calendar back into term-todo)
 - Optional automatic cloud sync for plain CLI commands (`add`, `done`, …)
-- Recurring tasks
+- Repeat rules beyond daily/weekly/monthly (e.g. specific weekdays)
 - Local desktop notifications in addition to Calendar reminders
 
 ## License

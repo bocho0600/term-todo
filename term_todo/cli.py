@@ -10,7 +10,7 @@ from rich.text import Text
 
 from . import cloud, google_auth, storage
 from .calendar_sync import create_event, delete_event, get_service
-from .dates import format_due, parse_due
+from .dates import REPEATS, format_due, parse_due, parse_repeat
 from .google_auth import ALL_SCOPES, NotSignedIn, account_name, get_credentials
 from .models import DEFAULT_BUCKET
 
@@ -37,10 +37,22 @@ def add(
         DEFAULT_BUCKET, "--bucket", "-b", help="Bucket, e.g. work or personal"
     ),
     note: str = typer.Option("", "--note", "-n", help="Notes for this task"),
+    repeat: str = typer.Option(
+        "", "--repeat", "-r", help=f"Repeat when completed: {', '.join(REPEATS)} (needs --due)"
+    ),
 ) -> None:
     """Add a new task."""
-    task = storage.add_task(title, _parse_due(due), bucket.strip().lower(), note)
+    try:
+        rule = parse_repeat(repeat)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    due_at = _parse_due(due)
+    if rule and not due_at:
+        raise typer.BadParameter("--repeat needs a --due date to count from.")
+    task = storage.add_task(title, due_at, bucket.strip().lower(), note, rule)
     suffix = f" (due {task.due})" if task.due else ""
+    if task.repeat:
+        suffix += f" ↻ {task.repeat}"
     console.print(
         f"[green]Added[/green] #{task.id} [cyan]\\[{task.bucket}][/cyan]: {task.title}{suffix}"
     )
@@ -72,6 +84,8 @@ def list_cmd(
     for t in tasks:
         status = "[green]done[/green]" if t.done else "[yellow]pending[/yellow]"
         due = format_due(t.due, short=False) if t.due else "-"
+        if t.repeat:
+            due += f" ↻{t.repeat}"
         synced = "yes" if t.gcal_event_id else "-"
         table.add_row(str(t.id), t.bucket, status, t.title, "✎" if t.notes else "", due, synced)
     console.print(table)
@@ -164,8 +178,10 @@ def done(task_id: int) -> None:
     if not task:
         console.print(f"[red]No task with id {task_id}[/red]")
         raise typer.Exit(code=1)
-    storage.mark_done(task_id)
+    nxt = storage.mark_done(task_id)
     console.print(f"[green]Marked done:[/green] #{task_id} {task.title}")
+    if nxt and nxt.due:
+        console.print(f"[cyan]Next:[/cyan] #{nxt.id} due {format_due(nxt.due, short=False)} ↻ {nxt.repeat}")
 
 
 @app.command()

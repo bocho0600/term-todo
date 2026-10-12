@@ -15,4 +15,5 @@ class Task:
     created_at: datetime
     bucket: str = DEFAULT_BUCKET
     notes: str = ""
+    repeat: str = ""  # "", "daily", "weekly" or "monthly"
     uid: str = ""  # stable id shared across machines (the integer id is local only)

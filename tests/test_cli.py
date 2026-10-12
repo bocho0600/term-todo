@@ -158,3 +158,17 @@ def test_sync_signed_out_skips_cloud_and_hints(monkeypatch):
     storage.add_task("dated", datetime(2026, 10, 20))
     r = run("sync")
     assert syncs == [] and events and "term-todo login" in r.output
+
+
+def test_add_repeat_needs_due_and_valid_rule():
+    assert runner.invoke(app, ["add", "x", "--repeat", "weekly"]).exit_code != 0
+    assert runner.invoke(app, ["add", "x", "-d", "2026-10-15", "-r", "sometimes"]).exit_code != 0
+
+
+def test_done_on_repeating_task_reports_next():
+    from datetime import datetime, timedelta
+
+    due = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    assert runner.invoke(app, ["add", "water plants", "-d", due, "-r", "weekly"]).exit_code == 0
+    result = runner.invoke(app, ["done", "1"])
+    assert result.exit_code == 0 and "Next:" in result.output
