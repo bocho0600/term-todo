@@ -8,9 +8,10 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from . import storage
+from . import cloud, google_auth, storage
 from .calendar_sync import create_event, delete_event, get_service
 from .dates import format_due, parse_due
+from .google_auth import ALL_SCOPES, NotSignedIn, account_name, get_credentials
 from .models import DEFAULT_BUCKET
 
 app = typer.Typer(
@@ -183,17 +184,60 @@ def rm(task_id: int) -> None:
     console.print(f"[green]Removed:[/green] #{task_id} {task.title}")
 
 
+def _cloud_sync() -> bool:
+    """Merge tasks with the cloud copy. Returns False (after explaining) if it failed."""
+    try:
+        result = cloud.sync()
+    except (cloud.CloudError, NotSignedIn) as exc:
+        console.print(f"[yellow]Cloud sync skipped:[/yellow] {exc}")
+        return False
+    if result.changed:
+        console.print(
+            f"[cyan]Cloud:[/cyan] pulled {result.pulled}, pushed {result.pushed} task(s)"
+        )
+    else:
+        console.print("[cyan]Cloud:[/cyan] up to date")
+    return True
+
+
+@app.command()
+def login() -> None:
+    """Sign in with Google so your tasks sync between machines (and to Calendar)."""
+    try:
+        get_credentials(ALL_SCOPES)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    name = account_name()
+    console.print(f"[green]Signed in[/green]{f' as {name}' if name else ''}.")
+    _cloud_sync()
+
+
+@app.command()
+def logout() -> None:
+    """Sign out of Google on this machine. Your local tasks are kept."""
+    if google_auth.logout():
+        console.print("[green]Signed out.[/green] Local tasks are untouched.")
+    else:
+        console.print("[dim]Wasn't signed in.[/dim]")
+
+
 @app.command()
 def sync(
     reminder: int = typer.Option(
         30, "--reminder", "-r", help="Popup reminder, minutes before due"
     ),
 ) -> None:
-    """Sync tasks with Google Calendar.
+    """Sync with Google: merge tasks with your other machines, then update Calendar.
 
-    Pushes pending tasks that have a due date as Calendar events, and removes
-    the Calendar event for tasks you've since marked done.
+    When signed in (term-todo login), tasks are merged with the copy in your Google
+    account. Pending tasks with a due date are pushed to Google Calendar as events,
+    and events for tasks you've marked done are removed.
     """
+    cloud_on = google_auth.cloud_enabled()
+    if cloud_on:
+        _cloud_sync()
+
     service = get_service()
 
     to_push = storage.tasks_needing_push()
@@ -213,7 +257,13 @@ def sync(
         console.print(f"[green]Cleared calendar event for completed[/green] #{task.id}")
 
     if not to_push and not to_clean:
-        console.print("[dim]Nothing to sync.[/dim]")
+        console.print("[dim]Calendar: nothing to sync.[/dim]")
+    elif cloud_on:
+        _cloud_sync()  # publish the new event ids so other machines don't duplicate them
+    if not cloud_on:
+        console.print(
+            "[dim]Tip: run `term-todo login` to also keep your tasks in sync across machines.[/dim]"
+        )
 
 
 if __name__ == "__main__":

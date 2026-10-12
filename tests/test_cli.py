@@ -82,3 +82,79 @@ def test_rm_without_calendar_event():
     assert run("rm", "1").exit_code == 0
     assert storage.get_task(1) is None
     assert run("rm", "1").exit_code == 1
+
+
+# ---------- Google sign-in / cloud sync commands (all Google calls faked) ----------
+
+def _fake_google(monkeypatch, signed_in=True):
+    from datetime import datetime
+
+    from term_todo import cli, cloud, google_auth
+
+    events = []
+    monkeypatch.setattr(google_auth, "cloud_enabled", lambda: signed_in)
+    monkeypatch.setattr(cli, "get_service", lambda: object())
+
+    def fake_create(service, title, due, reminder_minutes=30):
+        events.append(title)
+        return "evt-1"
+
+    monkeypatch.setattr(cli, "create_event", fake_create)
+    monkeypatch.setattr(cli, "delete_event", lambda *a, **k: None)
+    syncs = []
+    monkeypatch.setattr(cloud, "sync", lambda store=None: syncs.append(1) or cloud.SyncResult())
+    return events, syncs, datetime
+
+
+def test_login_signs_in_then_syncs(monkeypatch):
+    from term_todo import cli, cloud
+
+    monkeypatch.setattr(cli, "get_credentials", lambda scopes: object())
+    monkeypatch.setattr(cli, "account_name", lambda: "me@example.com")
+    synced = []
+    monkeypatch.setattr(cloud, "sync", lambda store=None: synced.append(1) or cloud.SyncResult())
+    r = run("login")
+    assert r.exit_code == 0 and "me@example.com" in r.output and synced
+
+
+def test_login_without_client_file_explains(monkeypatch):
+    from term_todo import cli
+
+    def boom(scopes):
+        raise FileNotFoundError("Missing Google OAuth client file")
+
+    monkeypatch.setattr(cli, "get_credentials", boom)
+    r = run("login")
+    assert r.exit_code == 1 and "Missing Google OAuth client file" in r.output
+
+
+def test_logout(monkeypatch):
+    from term_todo import google_auth
+
+    monkeypatch.setattr(google_auth, "logout", lambda: True)
+    assert "Signed out" in run("logout").output
+    monkeypatch.setattr(google_auth, "logout", lambda: False)
+    assert "Wasn't signed in" in run("logout").output
+
+
+def test_sync_merges_cloud_before_and_after_calendar_changes(monkeypatch):
+    events, syncs, datetime = _fake_google(monkeypatch)
+    storage.add_task("dated", datetime(2026, 10, 20), "work")
+    r = run("sync")
+    assert r.exit_code == 0
+    assert events == ["[work] dated"]
+    assert len(syncs) == 2  # once up front, once to publish the new calendar event id
+
+
+def test_sync_without_calendar_changes_syncs_cloud_once(monkeypatch):
+    events, syncs, _ = _fake_google(monkeypatch)
+    storage.add_task("undated", None)
+    run("sync")
+    assert events == [] and len(syncs) == 1
+
+
+def test_sync_signed_out_skips_cloud_and_hints(monkeypatch):
+    events, syncs, datetime = _fake_google(monkeypatch, signed_in=False)
+    storage.add_task("dated", datetime(2026, 10, 20))
+    r = run("sync")
+    assert syncs == [] and events and "term-todo login" in r.output
