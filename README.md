@@ -1,5 +1,8 @@
 # term-todo
 
+[![CI](https://github.com/bocho0600/term-todo/actions/workflows/ci.yml/badge.svg)](https://github.com/bocho0600/term-todo/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A fast, keyboard-and-mouse friendly to-do list for your terminal — with
 buckets, per-task notes, a full-screen UI with a calendar date picker, a
 system-tray counter, and optional one-way sync to Google Calendar.
@@ -34,6 +37,7 @@ system-tray counter, and optional one-way sync to Google Calendar.
 - [Updating & uninstalling](#updating--uninstalling)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Releasing](#releasing)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -300,13 +304,54 @@ git clone https://github.com/bocho0600/term-todo.git
 cd term-todo
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
 term-todo --help
 ```
 
+Run the checks (the same ones CI runs on every push and pull request):
+
+```bash
+ruff check .      # lint
+pytest -q         # test suite
+python -m build && twine check dist/*   # packaging sanity check
+```
+
+The tests use a throwaway data directory, so they never touch your real tasks.
+The UI tests drive the Textual app headlessly. CI runs the suite on Python
+3.9 through 3.13.
+
 Layout: `term_todo/cli.py` (Typer commands), `ui.py` (Textual UI and date
 picker), `tray.py` (StatusNotifier tray icon), `storage.py` (SQLite),
-`calendar_sync.py` (Google Calendar), `dates.py` (date parsing/formatting).
+`calendar_sync.py` (Google Calendar), `dates.py` (date parsing/formatting);
+`tests/` mirrors those modules.
+
+## Releasing
+
+Releases are published to [PyPI](https://pypi.org/) by GitHub Actions when you
+push a version tag. It uses PyPI *trusted publishing*, so no API token is
+stored anywhere.
+
+**One-time setup (maintainer):**
+
+1. Create a PyPI account, then add a *pending publisher* at
+   <https://pypi.org/manage/account/publishing/> with: project name
+   `term-todo`, owner `bocho0600`, repository `term-todo`, workflow
+   `release.yml`, environment `pypi`.
+2. In the GitHub repo: Settings → Environments → create an environment named
+   `pypi` (optionally require your approval for deployments).
+
+**Each release:**
+
+```bash
+# 1. bump `version` in pyproject.toml and commit it
+# 2. tag it (the tag must be "v" + the version) and push
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow runs the tests, builds the package, publishes it to PyPI and
+creates a GitHub Release with the build attached. Once the first release is
+live, users can install with `pipx install term-todo`.
 
 ## Roadmap
 
