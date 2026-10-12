@@ -22,6 +22,9 @@ dependencies = [
     "google-auth-oauthlib>=1.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5", "build", "twine"]
+
 [project.urls]
 Homepage = "https://github.com/bocho0600/term-todo"
 Issues = "https://github.com/bocho0600/term-todo/issues"
@@ -35,3 +38,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["term_todo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # long lines inside XML/CSS strings are fine

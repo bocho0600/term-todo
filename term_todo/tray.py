@@ -13,7 +13,10 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from gi.repository import GLib
 
 from . import storage
 from .dates import format_due, is_overdue

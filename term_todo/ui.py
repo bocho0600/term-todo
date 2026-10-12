@@ -19,13 +19,13 @@ from textual.widgets import (
     Input,
     Label,
     OptionList,
-    TextArea,
     Static,
+    TextArea,
 )
 from textual.widgets.option_list import Option
 
 from . import storage
-from .calendar_sync import delete_event, get_service, create_event
+from .calendar_sync import create_event, delete_event, get_service
 from .config import TOKEN_PATH
 from .dates import format_due, has_time, is_overdue, parse_due
 from .models import DEFAULT_BUCKET, Task

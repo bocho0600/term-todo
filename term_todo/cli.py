@@ -9,9 +9,9 @@ from rich.table import Table
 from rich.text import Text
 
 from . import storage
-from .models import DEFAULT_BUCKET
-from .dates import format_due, parse_due
 from .calendar_sync import create_event, delete_event, get_service
+from .dates import format_due, parse_due
+from .models import DEFAULT_BUCKET
 
 app = typer.Typer(
     help="A terminal to-do list that can sync tasks to Google Calendar.",

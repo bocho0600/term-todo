@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
-from .dates import has_time
 from .config import CREDENTIALS_PATH, TOKEN_PATH
+from .dates import has_time
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
