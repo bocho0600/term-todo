@@ -35,6 +35,7 @@ system-tray counter, and optional one-way sync to Google Calendar.
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 - [Roadmap](#roadmap)
+- [License](#license)
 
 ## Install
 
@@ -313,3 +314,7 @@ picker), `tray.py` (StatusNotifier tray icon), `storage.py` (SQLite),
 - Automatic background sync
 - Recurring tasks
 - Local desktop notifications in addition to Calendar reminders
+
+## License
+
+[MIT](LICENSE) © 2026 bocho0600
