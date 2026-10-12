@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import calendar
 from datetime import date, datetime
 from typing import Dict, List, Optional
@@ -24,7 +25,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from . import storage
+from . import cloud, google_auth, storage
 from .calendar_sync import create_event, delete_event, get_service
 from .config import TOKEN_PATH
 from .dates import format_due, has_time, is_overdue, parse_due
@@ -345,6 +346,7 @@ class TaskTable(DataTable):
 class TodoApp(App):
     TITLE = "term-todo"
     SUB_TITLE = "your tasks, bucketed"
+    SYNC_DELAY = 3.0  # seconds after the last local change before syncing to the cloud
 
     CSS = """
     Screen { background: $surface; }
@@ -414,6 +416,9 @@ class TodoApp(App):
         self.current_bucket: str = ALL
         self.show_done = False
         self.tasks: List[Task] = []
+        self._dirty = False
+        self._sync_timer = None
+        self._cloud_warned = False
 
     # ---- layout ----
     def compose(self) -> ComposeResult:
@@ -439,6 +444,9 @@ class TodoApp(App):
         table.add_column("Cal", width=4)
         self.refresh_all()
         table.focus()
+        if google_auth.cloud_enabled():
+            self.sub_title = "☁ syncing…"
+            self._cloud_sync()
 
     # ---- data -> widgets ----
     def refresh_all(self, keep_task_id: Optional[int] = None) -> None:
@@ -534,6 +542,7 @@ class TodoApp(App):
             task = self.tasks[event.row]
             storage.set_done(task.id, not task.done)
             self.refresh_all(keep_task_id=task.id)
+            self._mark_dirty()
 
     # ---- actions ----
     def action_add(self) -> None:
@@ -547,6 +556,7 @@ class TodoApp(App):
             )
             self.current_bucket = task.bucket if self.current_bucket != ALL else ALL
             self.refresh_all(keep_task_id=task.id)
+            self._mark_dirty()
             self.notify(f"Added #{task.id} to {task.bucket}")
 
         self.push_screen(TaskForm("New task", bucket=bucket), done)
@@ -569,6 +579,7 @@ class TodoApp(App):
                 task.id, result["title"], new_due, result["bucket"], result["notes"]
             )
             self.refresh_all(keep_task_id=task.id)
+            self._mark_dirty()
             self.notify(f"Updated #{task.id}")
 
         self.push_screen(
@@ -589,6 +600,7 @@ class TodoApp(App):
             return
         storage.set_done(task.id, not task.done)
         self.refresh_all(keep_task_id=task.id)
+        self._mark_dirty()
 
     def action_delete(self) -> None:
         task = self._selected()
@@ -602,6 +614,7 @@ class TodoApp(App):
                 self._drop_event(task)
             storage.delete_task(task.id)
             self.refresh_all()
+            self._mark_dirty()
             self.notify(f"Deleted #{task.id}")
 
         self.push_screen(Confirm(f"Delete “{task.title}”?"), done)
@@ -611,19 +624,22 @@ class TodoApp(App):
         self._refresh_table()
 
     def action_sync(self) -> None:
-        if not TOKEN_PATH.exists():
+        if not google_auth.has_scopes(google_auth.CALENDAR_SCOPES):
             self.notify(
-                "Not signed in to Google yet. Run `term-todo sync` once in a shell.",
+                "Not signed in to Google yet. Run `term-todo login` once in a shell.",
                 severity="warning",
                 timeout=8,
             )
             return
-        self.notify("Syncing with Google Calendar…")
+        self.notify("Syncing…")
         self._run_sync()
 
-    @work(thread=True)
+    @work(thread=True, exclusive=True, group="calendar")
     def _run_sync(self) -> None:
         try:
+            cloud_on = google_auth.cloud_enabled()
+            if cloud_on:
+                cloud.sync()
             service = get_service()
             pushed = cleared = 0
             for t in storage.tasks_needing_push():
@@ -636,11 +652,56 @@ class TodoApp(App):
                 delete_event(service, t.gcal_event_id)
                 storage.set_gcal_event_id(t.id, None)
                 cleared += 1
-            msg = f"Sync done: {pushed} pushed, {cleared} cleared"
-            self.call_from_thread(self.notify, msg)
+            if cloud_on:
+                cloud.sync()  # publish new event ids so other machines don't duplicate them
+                self._dirty = False
+            self.call_from_thread(self.notify, f"Sync done: {pushed} pushed, {cleared} cleared")
+            self.call_from_thread(self._synced_ui)
         except Exception as exc:  # noqa: BLE001
             self.call_from_thread(self.notify, f"Sync failed: {exc}", severity="error")
-        self.call_from_thread(self._refresh_table)
+        self.call_from_thread(self.refresh_all)
+
+    # ---- cloud (multi-machine) sync ----
+    def _mark_dirty(self) -> None:
+        """Note a local change and sync it to the cloud a moment later."""
+        if not google_auth.cloud_enabled():
+            return
+        self._dirty = True
+        if self._sync_timer is not None:
+            self._sync_timer.stop()
+        self._sync_timer = self.set_timer(self.SYNC_DELAY, self._cloud_sync)
+
+    @work(thread=True, exclusive=True, group="cloud")
+    def _cloud_sync(self) -> None:
+        try:
+            result = cloud.sync()
+        except Exception as exc:  # noqa: BLE001 - offline, expired login, API disabled, ...
+            self.call_from_thread(self._cloud_failed, str(exc))
+            return
+        self._dirty = False
+        self.call_from_thread(self._synced_ui, result.pulled)
+
+    def _synced_ui(self, pulled: int = 0) -> None:
+        self.sub_title = f"☁ synced {datetime.now():%H:%M}"
+        if pulled:
+            selected = self._selected()
+            self.refresh_all(keep_task_id=selected.id if selected else None)
+            self.notify(f"Updated {pulled} task(s) from your other machines")
+
+    def _cloud_failed(self, message: str) -> None:
+        self.sub_title = "☁ offline — changes saved locally"
+        if not self._cloud_warned:
+            self._cloud_warned = True
+            self.notify(f"Cloud sync failed: {message}", severity="warning", timeout=8)
+
+    async def action_quit(self) -> None:
+        if self._dirty and google_auth.cloud_enabled():
+            self.sub_title = "☁ saving…"
+            try:
+                await asyncio.to_thread(cloud.sync)
+            except Exception:  # noqa: BLE001 - never block quitting; next sync will catch up
+                pass
+        self.exit()
 
 
 def run() -> None:

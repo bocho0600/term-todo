@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 if TYPE_CHECKING:
     from gi.repository import GLib
 
-from . import storage
+from . import cloud, google_auth, storage
 from .dates import format_due, is_overdue
 from .models import Task
 
@@ -27,6 +28,7 @@ MENU_PATH = "/MenuBar"
 APP_BUS_NAME = "dev.termtodo.Tray"
 MAX_TASKS_SHOWN = 15
 REFRESH_SECONDS = 30
+CLOUD_EVERY_TICKS = 10  # = every 5 minutes
 
 SNI_XML = """
 <node>
@@ -216,6 +218,7 @@ class Tray:
         self.count = -1
         self._snapshot: Tuple = ()
         self.pixmap = b""
+        self._ticks = 0
         self._rebuild(force=True)
 
     # ---- model -> menu ----
@@ -360,7 +363,22 @@ class Tray:
     def _emit(self, path: str, iface: str, signal: str, params=None) -> None:
         self.conn.emit_signal(None, path, iface, signal, params)
 
+    def _cloud_in_background(self) -> bool:
+        """Sync tasks with the cloud off the main loop; the next tick shows any changes."""
+        if google_auth.cloud_enabled():
+            def work() -> None:
+                try:
+                    cloud.sync()
+                except Exception:  # noqa: BLE001 - offline etc.; try again next time
+                    pass
+
+            threading.Thread(target=work, daemon=True).start()
+        return False  # so GLib.idle_add runs it once
+
     def _tick(self) -> bool:
+        self._ticks += 1
+        if self._ticks % CLOUD_EVERY_TICKS == 0:
+            self._cloud_in_background()
         if self._rebuild():
             self.revision += 1
             V = self.GLib.Variant
@@ -414,6 +432,7 @@ class Tray:
             self._register_with_watcher, None,
         )
         GLib.timeout_add_seconds(REFRESH_SECONDS, self._tick)
+        GLib.idle_add(self._cloud_in_background)
         try:
             self.loop.run()
         except KeyboardInterrupt:
