@@ -1,7 +1,12 @@
-# term-todo
+<h1 align="center">
+  <img src="https://raw.githubusercontent.com/bocho0600/term-todo/main/assets/banner.svg" alt="term-todo" width="640">
+</h1>
 
-[![CI](https://github.com/bocho0600/term-todo/actions/workflows/ci.yml/badge.svg)](https://github.com/bocho0600/term-todo/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/bocho0600/term-todo/actions/workflows/ci.yml"><img src="https://github.com/bocho0600/term-todo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/python-3.9%2B-3776ab.svg" alt="Python 3.9+">
+</p>
 
 A fast, keyboard-and-mouse friendly to-do list for your terminal — with
 buckets, per-task notes, a full-screen UI with a calendar date picker, a
@@ -18,6 +23,10 @@ system-tray counter, and optional one-way sync to Google Calendar.
   with a popup reminder, or all-day events when no time is set) and are
   removed when you tick the task off.
 - **Local & private** – tasks live in a SQLite file on your machine.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/bocho0600/term-todo/main/assets/demo.svg" alt="term-todo demo: adding tasks, listing them and syncing to Google Calendar" width="720">
+</p>
 
 > **Platform support:** developed and tested on Linux (Ubuntu/GNOME). The CLI,
 > terminal UI and Calendar sync are plain Python and *should* work on macOS and
@@ -323,7 +332,8 @@ The UI tests drive the Textual app headlessly. CI runs the suite on Python
 Layout: `term_todo/cli.py` (Typer commands), `ui.py` (Textual UI and date
 picker), `tray.py` (StatusNotifier tray icon), `storage.py` (SQLite),
 `calendar_sync.py` (Google Calendar), `dates.py` (date parsing/formatting);
-`tests/` mirrors those modules.
+`tests/` mirrors those modules. The animated README art in `assets/` is generated
+by `python3 scripts/gen_assets.py` — edit that script, not the SVGs.
 
 ## Releasing
 
